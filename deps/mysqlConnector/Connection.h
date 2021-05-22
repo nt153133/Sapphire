@@ -7,7 +7,7 @@
 
 #include "MysqlCommon.h"
 
-typedef struct st_mysql MYSQL;
+//typedef struct st_mysql MYSQL;
 
 namespace Mysql
 {

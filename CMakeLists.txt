@@ -44,7 +44,6 @@ find_package( MySQL )
 add_subdirectory( "deps/zlib" )
 add_subdirectory( "deps/MySQL" )
 add_subdirectory( "deps/datReader" )
-add_subdirectory( "deps/mysqlConnector" )
 add_subdirectory( "deps/recastnavigation" )
 
 ##############################
