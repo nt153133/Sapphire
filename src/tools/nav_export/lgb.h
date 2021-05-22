@@ -332,13 +332,24 @@ struct LGB_GROUP
             entries.push_back( std::make_shared< LGB_GIMMICK_ENTRY >( buf, entryOffset ) );
             break;
           case LgbEntryType::EventObject:
+            std::cout << "\t\tEventObject Found in map\n";
             entries.push_back( std::make_shared< LGB_EOBJ_ENTRY >( buf, entryOffset ) );
             break;
           case LgbEntryType::CollisionBox:
-            //entries.push_back( std::make_shared< LGB_COLLISION_BOX_ENTRY >( buf, entryOffset ) );
+            std::cout << "\t\tCollision Box\n";
+            entries.push_back( std::make_shared< LGB_COLLISION_BOX_ENTRY >( buf, entryOffset ) );
+            break;
+          case LgbEntryType::EventNpc:
+            std::cout << "\t\tEventNPC Found in map\n";
+            break;
+          case LgbEntryType::BattleNpc:
+            std::cout << "\t\tBattleNpc Found in map\n";
+            break;
+          case LgbEntryType::ChairMarker:
+          case LgbEntryType::Light:
             break;
           default:
-            //std::cout << "\t\tUnknown SGB entry! Group: " << name << " type: " << ( int )type << " index: " << i << " entryOffset: " << entryOffset << "\n";
+            std::cout << "\t\tUnknown SGB entry! Group: " << name << " type: " << ( int )type << " index: " << i << " entryOffset: " << entryOffset << "\n";
             break;
         }
       }

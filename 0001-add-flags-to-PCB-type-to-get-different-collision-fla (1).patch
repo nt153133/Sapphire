@@ -1,0 +1,160 @@
+From f611a3f80bc7ca96eaf06c8b160c3ce4be90c4cc Mon Sep 17 00:00:00 2001
+From: akuseru <adam@akuseru.io>
+Date: Sat, 16 May 2020 15:24:01 -0500
+Subject: [PATCH] add flags to PCB type to get different collision flags.
+
+---
+ src/tools/nav_export/lgb.h    | 15 ++++++++++--
+ src/tools/nav_export/main.cpp | 46 ++++++++++++++++++++++++++---------
+ src/tools/nav_export/pcb.h    |  3 ++-
+ 3 files changed, 49 insertions(+), 15 deletions(-)
+
+diff --git a/src/tools/nav_export/lgb.h b/src/tools/nav_export/lgb.h
+index 937f2f77..c13d33a3 100644
+--- a/src/tools/nav_export/lgb.h
++++ b/src/tools/nav_export/lgb.h
+@@ -332,13 +332,24 @@ struct LGB_GROUP
+             entries.push_back( std::make_shared< LGB_GIMMICK_ENTRY >( buf, entryOffset ) );
+             break;
+           case LgbEntryType::EventObject:
++            std::cout << "\t\tEventObject Found in map\n";
+             entries.push_back( std::make_shared< LGB_EOBJ_ENTRY >( buf, entryOffset ) );
+             break;
+           case LgbEntryType::CollisionBox:
+-            //entries.push_back( std::make_shared< LGB_COLLISION_BOX_ENTRY >( buf, entryOffset ) );
++            std::cout << "\t\tCollision Box\n";
++            entries.push_back( std::make_shared< LGB_COLLISION_BOX_ENTRY >( buf, entryOffset ) );
++            break;
++          case LgbEntryType::EventNpc:
++            std::cout << "\t\tEventNPC Found in map\n";
++            break;
++          case LgbEntryType::BattleNpc:
++            std::cout << "\t\tBattleNpc Found in map\n";
++            break;
++          case LgbEntryType::ChairMarker:
++          case LgbEntryType::Light:
+             break;
+           default:
+-            //std::cout << "\t\tUnknown SGB entry! Group: " << name << " type: " << ( int )type << " index: " << i << " entryOffset: " << entryOffset << "\n";
++            std::cout << "\t\tUnknown SGB entry! Group: " << name << " type: " << ( int )type << " index: " << i << " entryOffset: " << entryOffset << "\n";
+             break;
+         }
+       }
+diff --git a/src/tools/nav_export/main.cpp b/src/tools/nav_export/main.cpp
+index c42f8c17..98335e0d 100644
+--- a/src/tools/nav_export/main.cpp
++++ b/src/tools/nav_export/main.cpp
+@@ -34,7 +34,7 @@ using namespace Sapphire;
+ // garbage to ignore models
+ bool noObj = false;
+ 
+-std::string gamePath( "C:\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn\\game\\sqpack" );
++std::string gamePath( "C:\\Program Files (x86)\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn\\game\\sqpack" );
+ std::unordered_map< uint16_t, std::string > zoneNameMap;
+ std::map< std::string, std::string > exportedTeriMap;
+ 
+@@ -47,6 +47,7 @@ std::map< uint32_t, uint16_t > eobjSgbPaths;
+ xiv::dat::GameData* gameData = nullptr;
+ xiv::exd::ExdData* eData = nullptr;
+ 
++int ExportFlags = 0x2000;
+ 
+ enum class TerritoryTypeExdIndexes :
+   size_t
+@@ -167,8 +168,8 @@ void buildModelEntry( std::shared_ptr< PCB_FILE > pPcbFile, ExportedGroup& expor
+   {
+     ExportedMesh mesh;
+ 
+-    mesh.verts.resize( ( entry.header.num_vertices + entry.header.num_v16 ) * 3 );
+-    mesh.indices.resize( entry.header.num_indices * 3 );
++    mesh.verts.resize( ((unsigned long long)entry.header.num_vertices + entry.header.num_v16 ) * 3 );
++    //mesh.indices.resize( (unsigned long long)entry.header.num_indices * 3 );
+ 
+     float x_base = abs( float( entry.header.x1 - entry.header.x ) );
+     float y_base = abs( float( entry.header.y1 - entry.header.y ) );
+@@ -237,10 +238,23 @@ void buildModelEntry( std::shared_ptr< PCB_FILE > pPcbFile, ExportedGroup& expor
+ 
+     for( const auto& index : entry.data.indices )
+     {
+-      mesh.indices[ indices++ ] = index.index[ 0 ];
+-      mesh.indices[ indices++ ] = index.index[ 1 ];
+-      mesh.indices[ indices++ ] = index.index[ 2 ];
+-      // std::cout << std::to_string( index.unknown[0] )<< " " << std::to_string( index.unknown[1] )<< " " << std::to_string( index.unknown[2]) << std::endl;
++      //HitBoundaries = 0x2000U
++      //	PassthruBoundaries = 0x4000U,
++      //ZoneBounds = 0x10U,
++      //raycast 1 = 1
++      //Water = 0x8000U,
++      if ((index.flags & ExportFlags) == ExportFlags)
++      {
++        mesh.indices.push_back(index.index[0]);
++        mesh.indices.push_back(index.index[1]);
++        mesh.indices.push_back(index.index[2]);
++        indices += 3;
++
++       /* mesh.indices[indices++] = index.index[0];
++        mesh.indices[indices++] = index.index[1];
++        mesh.indices[indices++] = index.index[2];*/
++      }
++     // std::cout << std::to_string( index.flags )<< " " << std::to_string( index.unknown )<< " " << std::endl;
+     }
+     model.meshes[ meshCount++ ] = mesh;
+   }
+@@ -304,11 +318,16 @@ int main( int argc, char* argv[] )
+   auto entryStartTime = std::chrono::high_resolution_clock::now();
+ 
+   std::vector< std::string > argVec( argv + 1, argv + argc );
+-  std::string zoneName = "r2t2";
++  std::string zoneName = "d2t1";
++
++  bool generateNavmesh = false;
++  bool dumpAllZones = false;
++  int nJobs = std::thread::hardware_concurrency();
+ 
+-  bool generateNavmesh = true;
+-  bool dumpAllZones = true;
+-  int nJobs = 4;
++  if (nJobs == 0)
++    nJobs = 4;
++
++  printf("Jobs: %d\n", nJobs);
+ 
+   int exportFileType = 0;
+   if( !noObj )
+@@ -468,7 +487,9 @@ int main( int argc, char* argv[] )
+                 
+               }
+               break;
++
+               default:
++                std::cout << "\t\t Unknown Type " <<  (int)pEntry->getType() << "\n";
+                 break;
+             }
+           }
+@@ -500,7 +521,8 @@ int main( int argc, char* argv[] )
+ 
+   printf( "Finished all tasks in %lu seconds\n",
+             std::chrono::duration_cast< std::chrono::seconds >( std::chrono::high_resolution_clock::now() - startTime ).count() );
+-
++  std::cout << std::filesystem::current_path() << std::endl;
++  printf("Path: %s\n", std::filesystem::current_path().c_str());
+   delete eData;
+   delete gameData;
+   
+diff --git a/src/tools/nav_export/pcb.h b/src/tools/nav_export/pcb.h
+index 647c56ca..60598ac1 100644
+--- a/src/tools/nav_export/pcb.h
++++ b/src/tools/nav_export/pcb.h
+@@ -42,7 +42,8 @@ struct PCB_VERTEXDATA
+ struct PCB_INDEXDATA
+ {
+   uint8_t index[3];
+-  uint8_t unknown[3];
++  uint8_t unknown;
++  unsigned short flags;
+   uint8_t unknown1[6];
+ };
+ 
+-- 
+2.24.1.windows.2
+

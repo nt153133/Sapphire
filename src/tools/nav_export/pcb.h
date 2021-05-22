@@ -42,7 +42,8 @@ struct PCB_VERTEXDATA
 struct PCB_INDEXDATA
 {
   uint8_t index[3];
-  uint8_t unknown[3];
+  uint8_t unknown;
+  unsigned short flags;
   uint8_t unknown1[6];
 };
 
