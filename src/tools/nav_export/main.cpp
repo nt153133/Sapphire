@@ -314,6 +314,7 @@ void exportSgbModel( const std::string& sgbFilePath, LgbEntry* pGimmick, Exporte
 
 int main( int argc, char* argv[] )
 {
+  // Start benchmark clocks
   auto startTime = std::chrono::high_resolution_clock::now();
   auto entryStartTime = std::chrono::high_resolution_clock::now();
 
@@ -322,7 +323,7 @@ int main( int argc, char* argv[] )
 
   bool generateNavmesh = true;
   bool dumpAllZones = true;
-  int nJobs = std::thread::hardware_concurrency();
+  int nJobs = std::thread::hardware_concurrency() - 1;
 
   if (nJobs == 0)
     nJobs = 4;
@@ -433,7 +434,7 @@ int main( int argc, char* argv[] )
           buildModelEntry( pPcbFile, exportedTerrainGroup, fileName, zoneNameShort );
       }
       exportedZone.groups.emplace( exportedTerrainGroup.name, exportedTerrainGroup );
-      
+
       for( const auto& lgb : lgbList )
       {
         for( const auto& group : lgb.groups )
@@ -484,7 +485,7 @@ int main( int argc, char* argv[] )
                       exportSgbModel( offset1cFile, pEobj, exportedGroup, true );
                   }
                 }
-                
+
               }
               break;
 
@@ -504,7 +505,6 @@ int main( int argc, char* argv[] )
         std::chrono::duration_cast< std::chrono::seconds >( std::chrono::high_resolution_clock::now() - entryStartTime ).count() );
       //if( zoneCount++ % nJobs == 0 )
       {
-        exportMgr.restart();
         pCache->purge();
       }
     }
@@ -516,7 +516,7 @@ int main( int argc, char* argv[] )
     }
   }
   pCache->purge();
-  exportMgr.waitForTasks();
+  exportMgr.runToCompletion();
   std::cout << "\n\n\n";
 
   printf( "Finished all tasks in %lu seconds\n",
@@ -525,6 +525,6 @@ int main( int argc, char* argv[] )
   printf("Path: %s\n", std::filesystem::current_path().c_str());
   delete eData;
   delete gameData;
-  
+
   return 0;
 }
