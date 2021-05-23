@@ -9,41 +9,37 @@
 class ExportMgr
 {
 public:
-  ExportMgr( unsigned int maxJobs = 0 )
+  ExportMgr(unsigned int maxThreads = 0)  : m_threadpool(maxThreads)
   {
-    m_threadpool.addWorkers( maxJobs );
   }
+
   ~ExportMgr()
   {
-    waitForTasks();
-  }
-
-  void restart( bool cancel = false, unsigned int maxJobs = 0 )
-  {
-    if( cancel )
-      m_threadpool.cancel();
-
-    m_threadpool.complete();
-
-    m_threadpool.addWorkers( maxJobs );
+    cancel();
   }
 
   void exportZone(const ExportedZone& zone, ExportFileType exportFileTypes)
   {
-    m_threadpool.queue( [zone, exportFileTypes]()
+    m_threadpool.enqueue([zone, exportFileTypes]()
     {
       if( exportFileTypes & ExportFileType::WavefrontObj )
         ObjExporter::exportZone( zone );
 
       if( exportFileTypes & ExportFileType::Navmesh )
         NavmeshExporter::exportZone( zone );
-    } );
+    });
   }
 
-  void waitForTasks()
+  void runToCompletion()
   {
-    m_threadpool.complete();
+    m_threadpool.runToCompletion();
   }
+
+  void cancel()
+  {
+    m_threadpool.cancel();
+  }
+
 private:
   ThreadPool m_threadpool;
 };

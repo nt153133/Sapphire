@@ -1,108 +1,126 @@
 #ifndef THREADPOOL_H
 #define THREADPOOL_H
 
-#include <atomic>
+#include <algorithm>
 #include <condition_variable>
-#include <deque>
 #include <functional>
-#include <future>
-#include <memory>
 #include <mutex>
+#include <queue>
 #include <thread>
-
-// credit to
-// https://riptutorial.com/cplusplus/example/15806/create-a-simple-thread-pool
+#include <vector>
 
 class ThreadPool
 {
 public:
-  ThreadPool()
+  ThreadPool(unsigned int maxJobs = 0)
   {
+    if(maxJobs == 0)
+    {
+      // Auto-scale to available CPU threads
+      maxJobs = std::max(1, (int)std::thread::hardware_concurrency() - 1);
+    }
 
+    // Populate thread pool and watch for jobs to execute
+    {
+      std::unique_lock<std::mutex> lock(m_poolMutex);
+      m_threadPool.reserve(maxJobs);
+      for(unsigned int i = 0; i < maxJobs; i++)
+      {
+        m_threadPool.emplace_back([this] { this->runPendingJob(); });
+      }
+    }
   }
 
   ~ThreadPool()
   {
-    complete();
-  }
-
-  void addWorkers( unsigned int num )
-  {
-
-    std::unique_lock lock( m_mutex );
-    m_runFlag = true;
-    if( num == 0 )
-      num = std::thread::hardware_concurrency() - 1;
-
-    for( auto i = 0; i < num; ++i )
+    // Make sure jobs are cancelled during destruction
+    if(!m_stopped)
     {
-      m_workers.push_back( std::async( std::launch::async, [this]{ run(); } ) );
+      cancel();
     }
   }
 
-  template< class Func, class Ret = std::result_of_t< Func&() > >
-  std::future< Ret > queue( Func&& f )
+  // Adds a job to the queue
+  void enqueue(std::function<void(void)> func)
   {
-    std::packaged_task< Ret() > task( std::forward< Func >( f ) );
-    auto ret = task.get_future();
-    {
-      std::unique_lock lock( m_mutex );
-      m_pendingJobs.emplace_back( std::move( task ) );
-    }
-    m_cv.notify_one();
-    return ret;
+    std::unique_lock<std::mutex> lock(m_poolMutex);
+    m_pendingJobs.push(func);
+
+    m_jobStatus.notify_one();
   }
 
+  // Blocks until all jobs are processed
+  void runToCompletion()
+  {
+    std::unique_lock<std::mutex> lock(m_poolMutex);
+    m_doneStatus.wait(lock, [this](){ return m_pendingJobs.empty() && !m_activeJobs; });
+  }
+
+  // Cancels pending and current jobs
   void cancel()
   {
+    // Remove pending jobs
+    std::unique_lock<std::mutex> lock(m_poolMutex);
+    m_pendingJobs = {};
+
+    // Cancel currently running jobs
+    m_cancelling = true;
+    m_jobStatus.notify_all();
+    lock.unlock();
+
+    for(auto &t : m_threadPool)
     {
-      std::unique_lock lock( m_mutex );
-      m_pendingJobs.clear();
+      t.join();  // Finish remaining threads
     }
-    complete();
+
+    m_threadPool.clear();
+
+    m_stopped = true;
   }
 
-  bool complete()
-  {
-    {
-      std::unique_lock lock( m_mutex );
-      for( auto&& worker : m_workers )
-      {
-        m_pendingJobs.push_back( {} );
-      }
-    }
-    m_cv.notify_all();
-    m_workers.clear();
-    return true;
-  }
 private:
-  void run()
+  bool m_cancelling = false;
+  bool m_stopped = false;
+
+  std::queue<std::function<void(void)>> m_pendingJobs;
+
+  std::mutex m_poolMutex;
+  std::vector<std::thread> m_threadPool;
+  std::condition_variable m_jobStatus;
+  std::condition_variable m_doneStatus;
+  unsigned int m_activeJobs = 0;
+
+  // Function run per thread to find and execute jobs
+  void runPendingJob()
   {
-    while( 1 )
+    while(!m_cancelling)
     {
-      std::packaged_task< void() > func;
+      std::unique_lock<std::mutex> lock(m_poolMutex);
+
+      // Wait for notification unless no more jobs or canceled
+      m_jobStatus.wait(lock, [this]{ return m_cancelling || !m_pendingJobs.empty(); });
+
+      // Retrieve pending job
+      if(!m_cancelling && !m_pendingJobs.empty())
       {
-        std::unique_lock lock( m_mutex );
-        if( m_pendingJobs.empty() )
+        auto job = m_pendingJobs.front();
+        m_pendingJobs.pop();
+
+        if(job)
         {
-          m_cv.wait( lock, [&](){ return !m_pendingJobs.empty(); } );
+          m_activeJobs++;
+          lock.unlock();
+
+          job(); // Execute job on this thread, in parallel with others
+
+          lock.lock();
+          m_activeJobs--;
+
+          m_doneStatus.notify_one();
         }
-        func = std::move( m_pendingJobs.front() );
-        m_pendingJobs.pop_front();
       }
-      if( !func.valid() )
-      {
-        return;
-      }
-      func();
     }
   }
-
-  bool m_runFlag{ true };
-  std::mutex m_mutex;
-  std::condition_variable m_cv;
-  std::deque< std::packaged_task< void() > > m_pendingJobs;
-  std::vector< std::future< void > > m_workers;
 };
 
 #endif
