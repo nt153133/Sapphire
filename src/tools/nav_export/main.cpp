@@ -34,7 +34,7 @@ using namespace Sapphire;
 // garbage to ignore models
 bool noObj = false;
 
-std::string gamePath( "C:\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn\\game\\sqpack" );
+std::string gamePath( "/sqpack" );
 std::unordered_map< uint16_t, std::string > zoneNameMap;
 std::map< std::string, std::string > exportedTeriMap;
 
@@ -47,6 +47,7 @@ std::map< uint32_t, uint16_t > eobjSgbPaths;
 xiv::dat::GameData* gameData = nullptr;
 xiv::exd::ExdData* eData = nullptr;
 
+int ExportFlags = 0x2000;
 
 enum class TerritoryTypeExdIndexes :
   size_t
@@ -167,8 +168,8 @@ void buildModelEntry( std::shared_ptr< PCB_FILE > pPcbFile, ExportedGroup& expor
   {
     ExportedMesh mesh;
 
-    mesh.verts.resize( ( entry.header.num_vertices + entry.header.num_v16 ) * 3 );
-    mesh.indices.resize( entry.header.num_indices * 3 );
+    mesh.verts.resize( ((unsigned long long)entry.header.num_vertices + entry.header.num_v16 ) * 3 );
+    //mesh.indices.resize( (unsigned long long)entry.header.num_indices * 3 );
 
     float x_base = abs( float( entry.header.x1 - entry.header.x ) );
     float y_base = abs( float( entry.header.y1 - entry.header.y ) );
@@ -237,10 +238,23 @@ void buildModelEntry( std::shared_ptr< PCB_FILE > pPcbFile, ExportedGroup& expor
 
     for( const auto& index : entry.data.indices )
     {
-      mesh.indices[ indices++ ] = index.index[ 0 ];
-      mesh.indices[ indices++ ] = index.index[ 1 ];
-      mesh.indices[ indices++ ] = index.index[ 2 ];
-      // std::cout << std::to_string( index.unknown[0] )<< " " << std::to_string( index.unknown[1] )<< " " << std::to_string( index.unknown[2]) << std::endl;
+      //HitBoundaries = 0x2000U
+      //	PassthruBoundaries = 0x4000U,
+      //ZoneBounds = 0x10U,
+      //raycast 1 = 1
+      //Water = 0x8000U,
+      if ((index.flags & ExportFlags) == ExportFlags)
+      {
+        mesh.indices.push_back(index.index[0]);
+        mesh.indices.push_back(index.index[1]);
+        mesh.indices.push_back(index.index[2]);
+        indices += 3;
+
+       /* mesh.indices[indices++] = index.index[0];
+        mesh.indices[indices++] = index.index[1];
+        mesh.indices[indices++] = index.index[2];*/
+      }
+     // std::cout << std::to_string( index.flags )<< " " << std::to_string( index.unknown )<< " " << std::endl;
     }
     model.meshes[ meshCount++ ] = mesh;
   }
@@ -300,15 +314,21 @@ void exportSgbModel( const std::string& sgbFilePath, LgbEntry* pGimmick, Exporte
 
 int main( int argc, char* argv[] )
 {
+  // Start benchmark clocks
   auto startTime = std::chrono::high_resolution_clock::now();
   auto entryStartTime = std::chrono::high_resolution_clock::now();
 
   std::vector< std::string > argVec( argv + 1, argv + argc );
-  std::string zoneName = "r2t2";
+  std::string zoneName = "d2t1";
 
   bool generateNavmesh = true;
   bool dumpAllZones = true;
-  int nJobs = 4;
+  int nJobs = std::thread::hardware_concurrency() - 1;
+
+  if (nJobs == 0)
+    nJobs = 4;
+
+  printf("Jobs: %d\n", nJobs);
 
   int exportFileType = 0;
   if( !noObj )
@@ -414,7 +434,7 @@ int main( int argc, char* argv[] )
           buildModelEntry( pPcbFile, exportedTerrainGroup, fileName, zoneNameShort );
       }
       exportedZone.groups.emplace( exportedTerrainGroup.name, exportedTerrainGroup );
-      
+
       for( const auto& lgb : lgbList )
       {
         for( const auto& group : lgb.groups )
@@ -465,10 +485,12 @@ int main( int argc, char* argv[] )
                       exportSgbModel( offset1cFile, pEobj, exportedGroup, true );
                   }
                 }
-                
+
               }
               break;
+
               default:
+                std::cout << "\t\t Unknown Type " <<  (int)pEntry->getType() << "\n";
                 break;
             }
           }
@@ -483,7 +505,6 @@ int main( int argc, char* argv[] )
         std::chrono::duration_cast< std::chrono::seconds >( std::chrono::high_resolution_clock::now() - entryStartTime ).count() );
       //if( zoneCount++ % nJobs == 0 )
       {
-        exportMgr.restart();
         pCache->purge();
       }
     }
@@ -495,14 +516,15 @@ int main( int argc, char* argv[] )
     }
   }
   pCache->purge();
-  exportMgr.waitForTasks();
+  exportMgr.runToCompletion();
   std::cout << "\n\n\n";
 
   printf( "Finished all tasks in %lu seconds\n",
             std::chrono::duration_cast< std::chrono::seconds >( std::chrono::high_resolution_clock::now() - startTime ).count() );
-
+  std::cout << std::filesystem::current_path() << std::endl;
+  printf("Path: %s\n", std::filesystem::current_path().c_str());
   delete eData;
   delete gameData;
-  
+
   return 0;
 }
